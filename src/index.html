@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>3D Engine - webgl</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+    <canvas 
+        id="webgl" 
+        width="500" 
+        height="500"
+        onContextMenu="return false;"
+    ></canvas>
+    <input id="objInput" type="file" accept="object/obj"/>
+    <input type="range" min="-180" max="180" value="0" 
+        id="xRotSlider" 
+        orient="vertical"
+    />
+    <p id="FPSlabel">STOPPED</p>
+    <p id="statusLabel"></p>
+    <script src="app.js"></script>
+</body>
+</html>
