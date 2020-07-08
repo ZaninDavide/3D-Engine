@@ -12,7 +12,8 @@ uniform mat4 mvp;
 uniform float baseColorArray[matCount * 3];
 uniform float specularityArray[matCount];
 uniform float metallicArray[matCount];
-uniform float baseColorTextureArray[matCount];
+uniform float baseColorTexturesArray[matCount];
+uniform float specularityTexturesArray[matCount];
 
 varying vec3 vnormal;
 varying vec2 vUV;
@@ -20,6 +21,7 @@ varying vec3 matBaseColor;
 varying float matSpecularity; // Specular exponent
 varying float matMetallic; // 1=dielettric 2=metallic
 varying float matBaseColorTexture; // -1=notexture
+varying float matSpecularityTexture; // -1=notexture
 
 
 void main()
@@ -36,7 +38,8 @@ void main()
         matBaseColor   = vec3(baseColorArray[matX], baseColorArray[matY], baseColorArray[matZ]);
         matSpecularity = specularityArray[int(matIndex)];
         matMetallic = metallicArray[int(matIndex)];
-        matBaseColorTexture = baseColorTextureArray[int(matIndex)];
+        matBaseColorTexture = baseColorTexturesArray[int(matIndex)];
+        matSpecularityTexture = specularityTexturesArray[int(matIndex)];
     }else{
         // use default color which always as index 0
         matBaseColor   = vec3(baseColorArray[0], baseColorArray[1], baseColorArray[2]);
@@ -60,6 +63,7 @@ varying vec3 matBaseColor;
 varying float matSpecularity; // Specular exponent
 varying float matMetallic; // 1=dielettric 2=metallic
 varying float matBaseColorTexture;
+varying float matSpecularityTexture;
 
 ${textures.map(t => `uniform sampler2D ${t.replace(/ +/g, '_')};`).join("\n")}
 
@@ -71,13 +75,23 @@ vec3 sampleTexture(float id, vec2 uv){
 }
 
 void main() {
-    // load texture data
+    // --- BASE COLOR
     vec3 baseColor;
     if(matBaseColorTexture >= -0.5){
         baseColor = sampleTexture(matBaseColorTexture, vUV);
     }else{
         baseColor = matBaseColor;
     }
+
+    // --- SPECULARITY
+    float specularity;
+    if(matSpecularityTexture >= -0.5){
+        specularity = length(sampleTexture(matSpecularityTexture, vUV));
+    }else{
+        specularity = matSpecularity;
+    }
+
+    // ---- rendering
 
     // ambient
     vec3 ambient = 0.05 * baseColor;
@@ -91,7 +105,7 @@ void main() {
     vec3 reflectDir = reflect(-lightDir, vnormal);
     
     vec3 halfwayDir = normalize(lightDir + viewDir);  
-    float spec = pow(max(dot(vnormal, halfwayDir), 0.0), matSpecularity);
+    float spec = pow(max(dot(vnormal, halfwayDir), 0.0), specularity * 1000.);
     
     vec3 specular = vec3(0.3) * spec;
 
@@ -99,10 +113,9 @@ void main() {
 
     // apply gamma correction
     gl_FragColor = vec4(pow(gl_FragColor.xyz, vec3(0.455)), 1.0);
-
 }
 `
-console.log(shader)
+// console.log(shader)
 return shader
 }
 

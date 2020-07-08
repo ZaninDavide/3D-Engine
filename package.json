@@ -12,6 +12,9 @@
     "start": "parcel src/index.html"
   },
   "keywords": [],
+  "browserslist": [
+      "last 10 Chrome versions"
+  ],
   "author": "",
   "license": "ISC"
 }

@@ -7,47 +7,70 @@ import {
 } from "./engine.js"
 
 function readFile(useText){
-    let file = document.getElementById("objInput").files[0]
-    var reader = new FileReader();
+    let files = Array.from(document.getElementById("objInput").files)
 
-    updateStatus("Importing '" + file.name + "'");
+    let file_type_order = [
+        "obj",
+        "mtl",
+        "jpg",
+        "jpeg",
+        "png",
+    ]
 
-	// file reading started
-	reader.addEventListener('loadstart', function() {
-	    document.querySelector("#objInput").style.display = 'none'; 
-	});
+    files.sort((a, b) => {
+        let va = file_type_order.indexOf(a.name.split(".").slice(-1)[0])
+        let vb = file_type_order.indexOf(b.name.split(".").slice(-1)[0])
+        return va - vb
+    })
 
-	// file reading finished successfully
-	reader.addEventListener('load', function(e) {
-        var text = e.target.result;
-        
-        useText(text, file.name);
+    document.querySelector("#objInput").style.display = 'none'; 
 
-        document.querySelector("#objInput").style.display = 'block'; 
+    let importFiles = (files, i = 0) => {
+        let file = files[i]
 
-        return text;
-	});
-
-	// file reading failed
-	reader.addEventListener('error', function() {
-	    alert('Error : Failed to read file');
-	});
-
-	// file read progress 
-	reader.addEventListener('progress', function(e) {
-	    if(e.lengthComputable == true) {
-	    	updateStatus("Importing progress: " + Math.floor((e.loaded/e.total)*100) + "%");
-	    }
-	});
-
-	// read as text file
-    updateStatus("Importing progress: 0%");
+        var reader = new FileReader();
     
-    if(file.name.endsWith(".jpg") || file.name.endsWith(".png")){   
-        reader.readAsDataURL(file);
-    }else{
-        reader.readAsText(file);
+        // file reading finished successfully
+        reader.addEventListener('load', async (e) => {
+            var text = e.target.result;
+            
+            await useText(text, file.name);
+    
+            if(files.length > i + 1){
+                importFiles(files, i + 1)
+            }else{  
+                setTimeZero(new Date())
+                setLastFPS(0)
+                startLoop()
+            }
+        });
+    
+        // file reading failed
+        reader.addEventListener('error', function() {
+            alert('Error : Failed to read file');
+        });
+    
+        // file read progress 
+        reader.addEventListener('progress', function(e) {
+            if(e.lengthComputable == true) {
+                updateStatus("Importing progress: " + Math.floor((e.loaded/e.total)*100) + "%");
+            }
+        });
+
+        updateStatus("Importing '" + file.name + "'");
+
+        updateStatus("Importing progress: 0%");
+        if(file.name.endsWith(".jpg") || file.name.endsWith(".jpeg") || file.name.endsWith(".png")){   
+            reader.readAsDataURL(file);
+        }else{
+            reader.readAsText(file);
+        }
+
     }
+
+    importFiles(files)
+
+    document.querySelector("#objInput").style.display = 'block'; 
 }
 
 function importMtl(text){
@@ -58,6 +81,7 @@ function importMtl(text){
     let specularityArray = []
     let metallicArray = [] // 1=dielettric 2=metallic
     let baseColorTexturesArray = []
+    let specularityTexturesArray = []
 
     let lines = text.split(/\r?\n/);
     lines.forEach(line => {
@@ -69,6 +93,7 @@ function importMtl(text){
             specularityArray.push(1)
             metallicArray.push(1)
             baseColorTexturesArray.push(undefined)
+            specularityTexturesArray.push(undefined)
 
         }else if(line.startsWith("Ns ")){
             let words = line.split(/\s+/)
@@ -84,10 +109,13 @@ function importMtl(text){
         }else if(line.startsWith("map_Kd ")){
             let words = line.split(/\s+/)
             baseColorTexturesArray[n - 1] = words.slice(-1)[0].split(/\\/).slice(-1)[0].split(".")[0]
+        }else if(line.startsWith("map_Ns ")){
+            let words = line.split(/\s+/)
+            specularityTexturesArray[n - 1] = words.slice(-1)[0].split(/\\/).slice(-1)[0].split(".")[0]
         }
     })
 
-    return {materials, baseColorArray, specularityArray, metallicArray, baseColorTexturesArray}
+    return {materials, baseColorArray, specularityArray, metallicArray, baseColorTexturesArray, specularityTexturesArray}
 }
 
 function importObj(text, clockwise = false){
@@ -313,7 +341,7 @@ function importObj(text, clockwise = false){
 
 function openFile(){
     setPlay(false)
-    readFile((text, name) => {
+    readFile(async (text, name) => {
         if(name.endsWith(".obj")){
             let obj = importObj(text, false)
 
@@ -325,34 +353,20 @@ function openFile(){
             setVertexMaterials(obj.vertex_materials)
             setIndices(obj.indices)
     
-            setTimeZero(new Date())
-            setLastFPS(0)
-    
             let camera = getCamera()
             camera.shift = [0, 0, 3];
             setCamera(camera)
-
-            // modelRot = [0, 0, 0]
             document.getElementById("xRotSlider").value = 0
-    
-            if(!getPlay()) startLoop()
 
         }else if(name.endsWith(".mtl")){
             if(hasMesh()){
                 let data = importMtl(text)
-                setMaterials(data.materials)
-
-                if(!getPlay()) {
-                    startLoop(data.baseColorArray, data.specularityArray, data.metallicArray, data.baseColorTexturesArray)
-                }else{
-                    alert("alert")
-                }
+                setMaterials(data)
             }else{
                 updateStatus("Error: import mesh before importing materials", "error")
             }
-        }else if(name.endsWith(".jpg") || name.endsWith(".png")){
-            uploadTexture(name.split(".")[0], text)
-            startLoop()
+        }else if(name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png")){
+            await uploadTexture(name.split(".")[0], text)
         }else{
             updateStatus("Error: file type not supported", "error")
         }

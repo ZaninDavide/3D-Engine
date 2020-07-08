@@ -38,6 +38,12 @@ let camera = {
 
 let modelRot = [0, 0, 0]
 
+let last_baseColorArray = [];
+let last_specularityArray = [];
+let last_metallicArray = [];
+let last_baseColorTexturesArray = [];
+let last_specularityTexturesArray = [];
+
 function newContext(){
     var canvas = document.getElementById("webgl")
     WIDTH = window.innerWidth
@@ -90,19 +96,10 @@ function init(){
     prog = newProgram(vs(), fs())
 }
 
-function startLoop(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray){
+function startLoop(){
     setPlay(true);
-
-    calculateShaders(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray)
-
-    calculateMVP()
-
-    //gl.enable(gl.CULL_FACE);
-    //gl.cullFace(gl.BACK);
-    gl.enable(gl.DEPTH_TEST);
-    
+    calculateShaders()
     updateStatus("Rendering");
-
     draw()
 }
 
@@ -242,8 +239,13 @@ function setVertexMaterials(vm){
     vertex_materials = vm
 }
 
-function setMaterials(m){
-    materials = m
+function setMaterials(data){
+    materials = data.materials
+    last_baseColorArray = data.baseColorArray 
+    last_specularityArray = data.specularityArray 
+    last_metallicArray = data.metallicArray 
+    last_baseColorTexturesArray = data.baseColorTexturesArray
+    last_specularityTexturesArray = data.specularityTexturesArray
 }
 
 function setIndices(i){
@@ -257,15 +259,13 @@ function setIndices(i){
     );
 }
 
-function uploadTexture(name, data_url) {
+async function uploadTexture(name, data_url) {
+    const id = textures.length
     const texture = gl.createTexture();
+
+    gl.activeTexture(gl.TEXTURE0 + id);
     gl.bindTexture(gl.TEXTURE_2D, texture);
   
-    // Because images have to be download over the internet
-    // they might take a moment until they are ready.
-    // Until then put a single pixel in the texture so we can
-    // use it immediately. When the image has finished downloading
-    // we'll update the texture with the contents of the image.
     const level = 0;
     const internalFormat = gl.RGBA;
     const width = 1;
@@ -273,54 +273,54 @@ function uploadTexture(name, data_url) {
     const border = 0;
     const srcFormat = gl.RGBA;
     const srcType = gl.UNSIGNED_BYTE;
-    const pixel = new Uint8Array([0, 0, 255, 255]);  // opaque blue
-    gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
-                  width, height, border, srcFormat, srcType,
-                  pixel);
+    const pixel = new Uint8Array([0, 0, 255, 255]);
+    gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, width, height, border, srcFormat, srcType, pixel);
   
     const image = new Image();
-    image.onload = function() {
-      gl.activeTexture(gl.TEXTURE0 + textures.length);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
-                    srcFormat, srcType, image);
-  
-      if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-         gl.generateMipmap(gl.TEXTURE_2D);
-      } else {
-         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      }
 
-      setUniform("texture", name, textures.length);
-    };
+    image.onload = () => {
+        gl.activeTexture(gl.TEXTURE0 + id);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, level, internalFormat, srcFormat, srcType, image);
+
+        if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+        } else {
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        }
+
+        setUniform("texture", name, id);
+    }    
     image.src = data_url;
-  
     textures.push(name)
-    calculateShaders()
-  }
+}
   
 function isPowerOf2(value) {
     return (value & (value - 1)) == 0;
 }
 
-function calculateMaterials(baseColorArray, specularityArray, metallicArray, baseColorTextureArray){
+function calculateMaterials(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray, specularityTexturesArray){
     let matIndices = vertex_materials.map(c => {
         return materials[c] || 0;
     })
-    
+
     setAttr("float", "matIndex", matIndices)
     // ----- MATERIALS DATA -----
     // the values you see down here are simply the default material
     // BASE COLOR / Kd
     setUniform("float_array", "baseColorArray", [0.2, 0.2, 1.0, ...baseColorArray]);
+    setUniform("float_array", "baseColorTexturesArray", [-1, ...(baseColorTexturesArray.map(c => textures.indexOf(c)))]);
+
     // SPECULARITY / !ROUGHNESS / SHININESS / Ns
     setUniform("float_array", "specularityArray", [32, ...specularityArray]);
+    setUniform("float_array", "specularityTexturesArray", [-1, ...(specularityTexturesArray.map(c => textures.indexOf(c)))]);
+
     // illum 1=dielettric 2=metallic
     setUniform("float_array", "metallicArray", [1, ...metallicArray]);
+
     // illum 1=dielettric 2=metallic
-    setUniform("float_array", "baseColorTextureArray", [-1, ...(baseColorTextureArray.map(c => textures.indexOf(c)))]);
     // REFLECTION COLOR / Ks better to use base color also for reflection color
 }
 
@@ -341,32 +341,27 @@ function calculateMVP(){
     ));
 }
 
-let last_baseColorArray = [];
-let last_specularityArray = [];
-let last_metallicArray = [];
-let last_baseColorTexturesArray = [];
-
-function calculateShaders(
-    baseColorArray = last_baseColorArray, 
-    specularityArray = last_specularityArray, 
-    metallicArray = last_metallicArray, 
-    baseColorTexturesArray = last_baseColorTexturesArray
-){
-    last_baseColorArray = baseColorArray 
-    last_specularityArray = specularityArray 
-    last_metallicArray = metallicArray 
-    last_baseColorTexturesArray = baseColorTexturesArray
+function calculateShaders(){
 
     clearUniformLocations()
 
-    prog = newProgram(vs(specularityArray.length + 1), fs(textures));
+    prog = newProgram(vs(last_specularityArray.length + 1), fs(textures));
+
     gl.useProgram(prog)
-    calculateMaterials(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray)
+
+    calculateMaterials( 
+        last_baseColorArray, 
+        last_specularityArray, 
+        last_metallicArray, 
+        last_baseColorTexturesArray, 
+        last_specularityTexturesArray
+    )
 
     setUniform("vec3", "lightDir", lightDir);
     setUniform("vec3", "lightColor", lightColor);
 
     calculateMVP()
+    gl.enable(gl.DEPTH_TEST);
 }
 
 function draw(){
