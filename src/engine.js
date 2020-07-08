@@ -15,9 +15,11 @@ let prog;
 let vertices = []
 let indices = []
 let normals = []
+let uvs = []
 let vertex_materials = []
 
 let materials = {}
+let textures = []
 
 let lightDir = normalize([-2, 10, -5])
 let lightColor = [.5, .5, .5]
@@ -45,7 +47,7 @@ function newContext(){
 
     camera.aspectRatio = WIDTH / HEIGHT
     
-    var gl = canvas.getContext("experimental-webgl")
+    var gl = canvas.getContext("webgl2") // experimental-webgl
     if (!gl) {
         throw "Your web browser does not support WebGL!"
     }
@@ -88,10 +90,10 @@ function init(){
     prog = newProgram(vs(), fs())
 }
 
-function startLoop(baseColorArray, specularityArray, metallicArray){
+function startLoop(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray){
     setPlay(true);
 
-    calculateShaders(baseColorArray, specularityArray, metallicArray)
+    calculateShaders(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray)
 
     calculateMVP()
 
@@ -115,6 +117,11 @@ function setAttr(type, attr_name, arr) {
             size = 1;
             gl_type = gl.FLOAT;
             break;
+        case "vec2":
+            data = new Float32Array(arr)
+            size = 2;
+            gl_type = gl.FLOAT;
+            break;
         case "vec3":
             data = new Float32Array(arr)
             size = 3;
@@ -128,6 +135,11 @@ function setAttr(type, attr_name, arr) {
         case "int":
             data = new Int32Array(arr)
             size = 1;
+            gl_type = gl.INT;
+            break;
+        case "ivec2":
+            data = new Int32Array(arr)
+            size = 2;
             gl_type = gl.INT;
             break;
         case "ivec3":
@@ -145,6 +157,9 @@ function setAttr(type, attr_name, arr) {
             size = 1;
             gl_type = gl.INT;
             break;
+        default:
+            console.error("Cannot create attribute of type: " + type)
+            return;
     }
     
     gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer())
@@ -167,6 +182,11 @@ function setVertices(v){
 function setNormals(n){
     normals = n
     setAttr("vec3", "normal", normals)
+}
+
+function setUVs(uv){
+    uvs = uv
+    setAttr("vec2", "uv", uvs)
 }
 
 // https://webglfundamentals.org/webgl/lessons/webgl-shaders-and-glsl.html#uniforms
@@ -210,8 +230,11 @@ function setUniform(type, name, value){
         case "float_array":
             gl.uniform1fv(location, value);
             break;
+        case "texture":
+            gl.uniform1i(location, value);
+            break;
         default:
-            console.log("Error: uniform type '" + type + "' not supported.")
+            console.error("Error: uniform type '" + type + "' not supported.")
     }
 }
 
@@ -234,7 +257,55 @@ function setIndices(i){
     );
 }
 
-function calculateMaterials(baseColorArray, specularityArray, metallicArray){
+function uploadTexture(name, data_url) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+  
+    // Because images have to be download over the internet
+    // they might take a moment until they are ready.
+    // Until then put a single pixel in the texture so we can
+    // use it immediately. When the image has finished downloading
+    // we'll update the texture with the contents of the image.
+    const level = 0;
+    const internalFormat = gl.RGBA;
+    const width = 1;
+    const height = 1;
+    const border = 0;
+    const srcFormat = gl.RGBA;
+    const srcType = gl.UNSIGNED_BYTE;
+    const pixel = new Uint8Array([0, 0, 255, 255]);  // opaque blue
+    gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
+                  width, height, border, srcFormat, srcType,
+                  pixel);
+  
+    const image = new Image();
+    image.onload = function() {
+      gl.activeTexture(gl.TEXTURE0 + textures.length);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, level, internalFormat,
+                    srcFormat, srcType, image);
+  
+      if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+         gl.generateMipmap(gl.TEXTURE_2D);
+      } else {
+         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      }
+
+      setUniform("texture", name, textures.length);
+    };
+    image.src = data_url;
+  
+    textures.push(name)
+    calculateShaders()
+  }
+  
+function isPowerOf2(value) {
+    return (value & (value - 1)) == 0;
+}
+
+function calculateMaterials(baseColorArray, specularityArray, metallicArray, baseColorTextureArray){
     let matIndices = vertex_materials.map(c => {
         return materials[c] || 0;
     })
@@ -248,6 +319,8 @@ function calculateMaterials(baseColorArray, specularityArray, metallicArray){
     setUniform("float_array", "specularityArray", [32, ...specularityArray]);
     // illum 1=dielettric 2=metallic
     setUniform("float_array", "metallicArray", [1, ...metallicArray]);
+    // illum 1=dielettric 2=metallic
+    setUniform("float_array", "baseColorTextureArray", [-1, ...(baseColorTextureArray.map(c => textures.indexOf(c)))]);
     // REFLECTION COLOR / Ks better to use base color also for reflection color
 }
 
@@ -268,12 +341,27 @@ function calculateMVP(){
     ));
 }
 
-function calculateShaders(baseColorArray = [], specularityArray = [], metallicArray = []){
+let last_baseColorArray = [];
+let last_specularityArray = [];
+let last_metallicArray = [];
+let last_baseColorTexturesArray = [];
+
+function calculateShaders(
+    baseColorArray = last_baseColorArray, 
+    specularityArray = last_specularityArray, 
+    metallicArray = last_metallicArray, 
+    baseColorTexturesArray = last_baseColorTexturesArray
+){
+    last_baseColorArray = baseColorArray 
+    last_specularityArray = specularityArray 
+    last_metallicArray = metallicArray 
+    last_baseColorTexturesArray = baseColorTexturesArray
+
     clearUniformLocations()
 
-    prog = newProgram(vs(specularityArray.length + 1), fs());
+    prog = newProgram(vs(specularityArray.length + 1), fs(textures));
     gl.useProgram(prog)
-    calculateMaterials(baseColorArray, specularityArray, metallicArray)
+    calculateMaterials(baseColorArray, specularityArray, metallicArray, baseColorTexturesArray)
 
     setUniform("vec3", "lightDir", lightDir);
     setUniform("vec3", "lightColor", lightColor);
@@ -338,6 +426,7 @@ module.exports = {
     newProgram, 
     setAttr, 
     setVertices,
+    setUVs,
     setNormals,
     setIndices,
     setVertexMaterials,
@@ -359,6 +448,7 @@ module.exports = {
     startLoop,
     hasMesh,
     getModelRot, 
-    setModelRot 
+    setModelRot,
+    uploadTexture
 }
 

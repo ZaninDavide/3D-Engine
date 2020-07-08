@@ -5,3 +5,4 @@ import { updateStatus } from "./utilities.js"
 
 init()
 initUI()
+updateStatus("Initialised")
